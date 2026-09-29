@@ -1,4 +1,4 @@
-import type { CompleteUploadRequest, ImageDto, PresignRequest, PresignResponse, QuotaDto } from '@/lib/shared';
+import type { CompleteUploadRequest, ImageDto, PresignRequest, PresignResponse } from '@/lib/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
@@ -50,7 +50,8 @@ export function createApi(getToken: TokenFn) {
   return {
     listImages: () =>
       request<{ data: ImageDto[] }>('/api/v1/images', getToken),
-    getQuota: () => request<QuotaDto>('/api/v1/images/quota', getToken),
+    getImage: (id: string) =>
+      request<ImageDto>(`/api/v1/images/${id}`, getToken),
     deleteImage: (id: string) =>
       request<void>(`/api/v1/images/${id}`, getToken, { method: 'DELETE' }),
     presign: (body: PresignRequest) =>

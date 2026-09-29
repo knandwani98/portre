@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { ImporterDialog } from '@/components/upload/importer-dialog';
-import { useImages, useQuota } from '@/hooks/use-images';
+import { quotaFromImages, useImages, usePollInFlightImages } from '@/hooks/use-images';
 import { useUploadQueue } from '@/hooks/use-upload-queue';
 
 type UploadQueueContextValue = ReturnType<typeof useUploadQueue> & {
@@ -22,14 +22,16 @@ const UploadQueueContext = createContext<UploadQueueContextValue | null>(null);
 
 export function UploadQueueProvider({ children }: { children: ReactNode }) {
   const queue = useUploadQueue();
-  const quotaQuery = useQuota();
   const imagesQuery = useImages();
+  usePollInFlightImages(imagesQuery.data);
   const [importerOpen, setImporterOpen] = useState(false);
-  const remaining = quotaQuery.data?.remaining ?? 0;
+  const remaining = imagesQuery.data
+    ? quotaFromImages(imagesQuery.data).remaining
+    : 0;
   const hasAccepted = (imagesQuery.data ?? []).some(
     (image) => image.status === 'ACCEPTED',
   );
-  const isReady = !quotaQuery.isLoading && !imagesQuery.isLoading;
+  const isReady = !imagesQuery.isLoading;
 
   const value = useMemo(
     () => ({

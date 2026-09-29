@@ -12,12 +12,11 @@ import { useUploadQueueContext } from '@/components/upload/upload-queue-provider
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDeleteQueue } from '@/hooks/use-delete-queue';
-import { useImages, useQuota } from '@/hooks/use-images';
+import { quotaFromImages, useImages } from '@/hooks/use-images';
 import { cn } from '@/lib/utils';
 
 export function GalleryView() {
   const imagesQuery = useImages();
-  const quotaQuery = useQuota();
   const {
     items,
     retryableIds,
@@ -48,7 +47,10 @@ export function GalleryView() {
   const notAccepted = images.filter(
     (image) => image.status === 'REJECTED' && !hiddenIds.has(image.id),
   );
-  const remaining = quotaQuery.data?.remaining ?? 0;
+  const quota = imagesQuery.data
+    ? quotaFromImages(imagesQuery.data)
+    : undefined;
+  const remaining = quota?.remaining ?? 0;
   const selectedCount = selectedIds.size;
   const allAcceptedSelected =
     accepted.length > 0 && accepted.every((image) => selectedIds.has(image.id));
@@ -117,7 +119,7 @@ export function GalleryView() {
     deleteImages(targets);
   }
 
-  if (imagesQuery.isLoading || quotaQuery.isLoading) {
+  if (imagesQuery.isLoading) {
     return (
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
@@ -134,7 +136,7 @@ export function GalleryView() {
           <div>
             <h1 className="text-2xl font-semibold">Accepted Photos</h1>
             <p className="text-sm text-muted-foreground">
-              {quotaQuery.data?.accepted ?? 0} of {MAX_ACCEPTED_PHOTOS} accepted
+              {quota?.accepted ?? 0} of {MAX_ACCEPTED_PHOTOS} accepted
               {remaining > 0 ? ` · ${remaining} remaining` : ''}
             </p>
           </div>

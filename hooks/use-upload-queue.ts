@@ -13,6 +13,10 @@ import {
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ApiError, createApi, putToPresignedUrl } from '@/lib/api';
+import {
+  removeImagesFromCache,
+  upsertImageInCache,
+} from '@/hooks/use-images';
 
 export type UploadItemStatus =
   | 'uploading'
@@ -217,13 +221,6 @@ export function useUploadQueue() {
     setVisible(false);
   }, [applyItems]);
 
-  const invalidateLists = useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['images'] }),
-      queryClient.invalidateQueries({ queryKey: ['quota'] }),
-    ]);
-  }, [queryClient]);
-
   const uploadOne = useCallback(
     async (entry: QueueEntry): Promise<'ok' | 'quota' | 'failed'> => {
       const { itemId, file, batchId } = entry;
@@ -258,9 +255,9 @@ export function useUploadQueue() {
           patchItem(itemId, { imageId });
           const token = await getToken();
           await putToPresignedUrl(presign.uploadUrl, file, mimeType, token);
-          await api.complete({ imageId });
+          const image = await api.complete({ imageId });
+          upsertImageInCache(queryClient, image);
           patchItem(itemId, { status: 'validating', imageId });
-          await invalidateLists();
           return 'ok';
         } catch (error) {
           if (imageId) {
@@ -270,7 +267,7 @@ export function useUploadQueue() {
               // Slot may already be freed.
             }
             patchItem(itemId, { imageId: undefined });
-            await invalidateLists();
+            removeImagesFromCache(queryClient, [imageId]);
           }
           if (error instanceof ApiError && error.code === 'QUOTA_EXCEEDED') {
             patchItem(itemId, {
@@ -297,7 +294,7 @@ export function useUploadQueue() {
       patchItem(itemId, { status: 'error', error: 'Failed to upload' });
       return 'failed';
     },
-    [dropRetryFile, getToken, invalidateLists, patchItem],
+    [dropRetryFile, getToken, patchItem, queryClient],
   );
 
   const processQueue = useCallback(async () => {

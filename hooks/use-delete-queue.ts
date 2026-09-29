@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { ImageDto } from '@/lib/shared';
 import { useCallback, useRef, useState } from 'react';
 import { createApi } from '@/lib/api';
+import { removeImagesFromCache, upsertImageInCache } from '@/hooks/use-images';
 
 export type DeleteItemStatus = 'deleting' | 'success' | 'error';
 
@@ -55,11 +56,9 @@ export function useDeleteQueue() {
         try {
           await api.deleteImage(image.id);
           patchItem(image.id, { status: 'success' });
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: ['images'] }),
-            queryClient.invalidateQueries({ queryKey: ['quota'] }),
-          ]);
+          removeImagesFromCache(queryClient, [image.id]);
         } catch (error) {
+          upsertImageInCache(queryClient, image);
           patchItem(image.id, {
             status: 'error',
             error: error instanceof Error ? error.message : 'Could not delete',
@@ -88,6 +87,10 @@ export function useDeleteQueue() {
         return;
       }
       const queuedIds = new Set(queued.map((image) => image.id));
+      removeImagesFromCache(
+        queryClient,
+        queued.map((image) => image.id),
+      );
       applyItems([
         ...queued.map((image) => ({
           id: image.id,
@@ -101,7 +104,7 @@ export function useDeleteQueue() {
       setExpanded(true);
       void processQueue();
     },
-    [applyItems, processQueue],
+    [applyItems, processQueue, queryClient],
   );
 
   const dismiss = useCallback(() => {
