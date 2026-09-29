@@ -19,7 +19,21 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-full font-sans antialiased">
-        <ClerkProvider appearance={{ theme: shadcn }}>
+        <ClerkProvider
+          appearance={{ theme: shadcn }}
+          localization={{
+            socialButtonsBlockButton: '{{provider|titleize}}',
+            signUp: {
+              start: {
+                title: 'Import, validate, and keep portraits with PortreAI',
+                titleCombined:
+                  'Import, validate, and keep portraits with PortreAI',
+                subtitle: '',
+                subtitleCombined: '',
+              },
+            },
+          }}
+        >
           <AppProviders>{children}</AppProviders>
         </ClerkProvider>
       </body>

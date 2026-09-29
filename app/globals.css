@@ -175,3 +175,32 @@
     cursor: pointer;
   }
 }
+
+.auth-split .cl-cardBox,
+.auth-split .cl-card {
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: transparent !important;
+}
+
+.auth-split button.cl-socialButtonsBlockButton {
+  background-color: var(--foreground) !important;
+  color: var(--background) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.auth-split button.cl-socialButtonsBlockButton:hover {
+  background-color: color-mix(in oklab, var(--foreground) 90%, transparent) !important;
+}
+
+.auth-split
+  button.cl-socialButtonsBlockButton
+  .cl-socialButtonsBlockButtonText {
+  color: var(--background) !important;
+}
+
+.auth-split .cl-signUp-root .cl-headerSubtitle {
+  display: none !important;
+}
