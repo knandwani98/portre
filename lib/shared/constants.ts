@@ -7,6 +7,7 @@ export const MIN_FACE_RATIO = 0.15;
 export const PHASH_HAMMING_THRESHOLD = 8;
 export const JOB_STALE_LOCK_MS = 2 * 60 * 1000;
 export const JOB_MAX_ATTEMPTS = 2;
+export const JOB_ABANDON_MS = JOB_STALE_LOCK_MS * JOB_MAX_ATTEMPTS;
 export const JOB_POLL_INTERVAL_MS = 1500;
 export const SIGNED_URL_EXPIRES_SECONDS = 60 * 10;
 export const PRESIGN_EXPIRES_SECONDS = 60 * 5;

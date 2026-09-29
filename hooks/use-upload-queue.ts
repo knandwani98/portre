@@ -12,7 +12,7 @@ import {
 } from '@/lib/shared';
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ApiError, createApi, putToPresignedUrl } from '@/lib/api';
+import { ApiError, createApi, isAbortError, putToPresignedUrl } from '@/lib/api';
 import {
   removeImagesFromCache,
   upsertImageInCache,
@@ -156,6 +156,7 @@ export function useUploadQueue() {
   const filesRef = useRef(new Map<string, File>());
   const queueRef = useRef<QueueEntry[]>([]);
   const runningRef = useRef(false);
+  const abortRef = useRef(new AbortController());
 
   const applyItems = useCallback((next: UploadItem[]) => {
     itemsRef.current = next;
@@ -221,8 +222,29 @@ export function useUploadQueue() {
     setVisible(false);
   }, [applyItems]);
 
+  const resetAbortController = useCallback(() => {
+    if (abortRef.current.signal.aborted) {
+      abortRef.current = new AbortController();
+    }
+    return abortRef.current;
+  }, []);
+
+  const abortInFlight = useCallback(() => {
+    abortRef.current.abort();
+    queueRef.current = [];
+    runningRef.current = false;
+    setIsUploading(false);
+    applyItems(
+      itemsRef.current.map((item) =>
+        isInProgress(item.status)
+          ? { ...item, status: 'error' as const, error: 'Cancelled' }
+          : item,
+      ),
+    );
+  }, [applyItems]);
+
   const uploadOne = useCallback(
-    async (entry: QueueEntry): Promise<'ok' | 'quota' | 'failed'> => {
+    async (entry: QueueEntry): Promise<'ok' | 'quota' | 'failed' | 'aborted'> => {
       const { itemId, file, batchId } = entry;
       if (!isAllowedUploadFile(file)) {
         patchItem(itemId, { status: 'error', error: 'Not a supported format' });
@@ -241,8 +263,15 @@ export function useUploadQueue() {
         return 'failed';
       }
 
-      const api = createApi(() => getToken());
+      const signal = abortRef.current.signal;
+      if (signal.aborted) {
+        return 'aborted';
+      }
+      const api = createApi(() => getToken(), signal);
       for (let attempt = 1; attempt <= JOB_MAX_ATTEMPTS; attempt += 1) {
+        if (signal.aborted) {
+          return 'aborted';
+        }
         let imageId: string | undefined;
         try {
           const presign = await api.presign({
@@ -254,7 +283,7 @@ export function useUploadQueue() {
           imageId = presign.imageId;
           patchItem(itemId, { imageId });
           const token = await getToken();
-          await putToPresignedUrl(presign.uploadUrl, file, mimeType, token);
+          await putToPresignedUrl(presign.uploadUrl, file, mimeType, token, signal);
           const image = await api.complete({ imageId });
           upsertImageInCache(queryClient, image);
           patchItem(itemId, { status: 'validating', imageId });
@@ -262,12 +291,15 @@ export function useUploadQueue() {
         } catch (error) {
           if (imageId) {
             try {
-              await api.deleteImage(imageId);
+              await createApi(() => getToken()).deleteImage(imageId);
             } catch {
               // Slot may already be freed.
             }
             patchItem(itemId, { imageId: undefined });
             removeImagesFromCache(queryClient, [imageId]);
+          }
+          if (isAbortError(error) || signal.aborted) {
+            return 'aborted';
           }
           if (error instanceof ApiError && error.code === 'QUOTA_EXCEEDED') {
             patchItem(itemId, {
@@ -301,16 +333,27 @@ export function useUploadQueue() {
     if (runningRef.current) {
       return;
     }
+    resetAbortController();
     runningRef.current = true;
     setIsUploading(true);
     let hadRetryableFailure = false;
+    let aborted = false;
     try {
       while (queueRef.current.length > 0) {
+        if (abortRef.current.signal.aborted) {
+          aborted = true;
+          break;
+        }
         const entry = queueRef.current.shift();
         if (!entry) {
           continue;
         }
         const result = await uploadOne(entry);
+        if (result === 'aborted') {
+          aborted = true;
+          queueRef.current = [];
+          break;
+        }
         if (result === 'quota') {
           while (queueRef.current.length > 0) {
             const rest = queueRef.current.shift();
@@ -333,10 +376,10 @@ export function useUploadQueue() {
       runningRef.current = false;
       setIsUploading(false);
     }
-    if (hadRetryableFailure) {
+    if (hadRetryableFailure && !aborted) {
       showFailedToast();
     }
-  }, [dropRetryFile, patchItem, showFailedToast, uploadOne]);
+  }, [dropRetryFile, patchItem, resetAbortController, showFailedToast, uploadOne]);
 
   const uploadFiles = useCallback(
     (files: File[]) => {
@@ -356,13 +399,14 @@ export function useUploadQueue() {
         });
         entries.push({ itemId, file, batchId });
       }
+      resetAbortController();
       applyItems([...queued, ...itemsRef.current]);
       queueRef.current.push(...entries);
       setVisible(true);
       setExpanded(true);
       void processQueue();
     },
-    [applyItems, processQueue],
+    [applyItems, processQueue, resetAbortController],
   );
 
   const enqueueRetries = useCallback(
@@ -388,6 +432,7 @@ export function useUploadQueue() {
       if (retry.length === 0) {
         return;
       }
+      resetAbortController();
       applyItems(
         itemsRef.current.map((item) =>
           retryIds.has(item.id)
@@ -400,7 +445,7 @@ export function useUploadQueue() {
       setExpanded(true);
       void processQueue();
     },
-    [applyItems, processQueue],
+    [applyItems, processQueue, resetAbortController],
   );
 
   const retryFailed = useCallback(() => {
@@ -417,10 +462,14 @@ export function useUploadQueue() {
   const retryableIds = items
     .filter((item) => item.status === 'error' && filesRef.current.has(item.id))
     .map((item) => item.id);
+  const hasInFlight =
+    isUploading || items.some((item) => isInProgress(item.status));
 
   return {
     uploadFiles,
     isUploading,
+    hasInFlight,
+    abortInFlight,
     items,
     retryableIds,
     retryItem,

@@ -13,6 +13,13 @@ export class ApiError extends Error {
   }
 }
 
+export function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
+}
+
 type TokenFn = () => Promise<string | null>;
 
 async function request<T>(
@@ -46,23 +53,25 @@ async function request<T>(
   return json as T;
 }
 
-export function createApi(getToken: TokenFn) {
+export function createApi(getToken: TokenFn, signal?: AbortSignal) {
   return {
     listImages: () =>
-      request<{ data: ImageDto[] }>('/api/v1/images', getToken),
+      request<{ data: ImageDto[] }>('/api/v1/images', getToken, { signal }),
     getImage: (id: string) =>
-      request<ImageDto>(`/api/v1/images/${id}`, getToken),
+      request<ImageDto>(`/api/v1/images/${id}`, getToken, { signal }),
     deleteImage: (id: string) =>
-      request<void>(`/api/v1/images/${id}`, getToken, { method: 'DELETE' }),
+      request<void>(`/api/v1/images/${id}`, getToken, { method: 'DELETE', signal }),
     presign: (body: PresignRequest) =>
       request<PresignResponse>('/api/v1/uploads/presign', getToken, {
         method: 'POST',
         body: JSON.stringify(body),
+        signal,
       }),
     complete: (body: CompleteUploadRequest) =>
       request<ImageDto>('/api/v1/uploads/complete', getToken, {
         method: 'POST',
         body: JSON.stringify(body),
+        signal,
       }),
   };
 }
@@ -72,10 +81,12 @@ export async function putToPresignedUrl(
   file: File,
   contentType: string,
   token?: string | null,
+  signal?: AbortSignal,
 ): Promise<void> {
   const response = await fetch(url, {
     method: 'PUT',
     body: file,
+    signal,
     headers: {
       'Content-Type': contentType,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

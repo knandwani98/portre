@@ -4,7 +4,7 @@ import { useAuth } from '@clerk/nextjs';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ImageDto } from '@/lib/shared';
 import { useCallback, useRef, useState } from 'react';
-import { createApi } from '@/lib/api';
+import { createApi, isAbortError } from '@/lib/api';
 import { removeImagesFromCache, upsertImageInCache } from '@/hooks/use-images';
 
 export type DeleteItemStatus = 'deleting' | 'success' | 'error';
@@ -23,8 +23,10 @@ export function useDeleteQueue() {
   const [visible, setVisible] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const itemsRef = useRef<DeleteItem[]>([]);
+  const originalsRef = useRef(new Map<string, ImageDto>());
   const queueRef = useRef<ImageDto[]>([]);
   const runningRef = useRef(false);
+  const abortRef = useRef(new AbortController());
 
   const applyItems = useCallback((next: DeleteItem[]) => {
     itemsRef.current = next;
@@ -40,15 +42,45 @@ export function useDeleteQueue() {
     [applyItems],
   );
 
+  const abortInFlight = useCallback(() => {
+    abortRef.current.abort();
+    const leftover = queueRef.current;
+    queueRef.current = [];
+    runningRef.current = false;
+    const restoring = new Map<string, ImageDto>();
+    for (const image of leftover) {
+      restoring.set(image.id, image);
+    }
+    for (const item of itemsRef.current) {
+      if (item.status !== 'deleting') {
+        continue;
+      }
+      const original = originalsRef.current.get(item.id);
+      if (original) {
+        restoring.set(original.id, original);
+      }
+    }
+    for (const image of restoring.values()) {
+      upsertImageInCache(queryClient, image);
+    }
+    applyItems(itemsRef.current.filter((item) => item.status !== 'deleting'));
+  }, [applyItems, queryClient]);
+
   const processQueue = useCallback(async () => {
     if (runningRef.current) {
       return;
     }
+    if (abortRef.current.signal.aborted) {
+      abortRef.current = new AbortController();
+    }
     runningRef.current = true;
-    const api = createApi(() => getToken());
+    const api = createApi(() => getToken(), abortRef.current.signal);
 
     try {
       while (queueRef.current.length > 0) {
+        if (abortRef.current.signal.aborted) {
+          break;
+        }
         const image = queueRef.current.shift();
         if (!image) {
           continue;
@@ -57,7 +89,15 @@ export function useDeleteQueue() {
           await api.deleteImage(image.id);
           patchItem(image.id, { status: 'success' });
           removeImagesFromCache(queryClient, [image.id]);
+          originalsRef.current.delete(image.id);
         } catch (error) {
+          if (isAbortError(error) || abortRef.current.signal.aborted) {
+            upsertImageInCache(queryClient, image);
+            applyItems(
+              itemsRef.current.filter((item) => item.id !== image.id),
+            );
+            break;
+          }
           upsertImageInCache(queryClient, image);
           patchItem(image.id, {
             status: 'error',
@@ -68,7 +108,7 @@ export function useDeleteQueue() {
     } finally {
       runningRef.current = false;
     }
-  }, [getToken, patchItem, queryClient]);
+  }, [applyItems, getToken, patchItem, queryClient]);
 
   const deleteImages = useCallback(
     (images: ImageDto[]) => {
@@ -87,6 +127,9 @@ export function useDeleteQueue() {
         return;
       }
       const queuedIds = new Set(queued.map((image) => image.id));
+      for (const image of queued) {
+        originalsRef.current.set(image.id, image);
+      }
       removeImagesFromCache(
         queryClient,
         queued.map((image) => image.id),
@@ -117,10 +160,13 @@ export function useDeleteQueue() {
       .filter((item) => item.status === 'deleting' || item.status === 'success')
       .map((item) => item.id),
   );
+  const hasInFlight = items.some((item) => item.status === 'deleting');
 
   return {
     deleteImages,
     items,
+    hasInFlight,
+    abortInFlight,
     visible,
     expanded,
     setExpanded,

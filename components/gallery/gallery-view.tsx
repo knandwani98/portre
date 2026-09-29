@@ -7,6 +7,7 @@ import { AcceptedGrid } from '@/components/gallery/accepted-grid';
 import { DeleteProgressPanel } from '@/components/gallery/delete-progress-panel';
 import { GuidelinesGrid } from '@/components/gallery/guidelines-grid';
 import { PermanentDeleteDialog } from '@/components/gallery/permanent-delete-dialog';
+import { LeaveProgressGuard } from '@/components/leave-progress-guard';
 import { UploadProgressPanel } from '@/components/upload/upload-progress-panel';
 import { useUploadQueueContext } from '@/components/upload/upload-queue-provider';
 import { Button } from '@/components/ui/button';
@@ -26,11 +27,15 @@ export function GalleryView() {
     expanded,
     setExpanded,
     dismiss,
+    hasInFlight: uploadInFlight,
+    abortInFlight: abortUploads,
     syncFromImages,
   } = useUploadQueueContext();
   const {
     deleteImages,
     items: deleteItems,
+    hasInFlight: deleteInFlight,
+    abortInFlight: abortDeletes,
     visible: deleteVisible,
     expanded: deleteExpanded,
     setExpanded: setDeleteExpanded,
@@ -176,6 +181,14 @@ export function GalleryView() {
           }
         }}
         onConfirm={handleDelete}
+      />
+      <LeaveProgressGuard
+        uploading={uploadInFlight}
+        deleting={deleteInFlight}
+        onAbort={() => {
+          abortUploads();
+          abortDeletes();
+        }}
       />
       {selectedCount > 0 ? (
         <div
